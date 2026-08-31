@@ -1708,18 +1708,24 @@
                 </h2>
             </div>
 
-            <div class="reveal rounded-2xl border border-dashed p-10 md:p-14 text-center max-w-3xl mx-auto md:mx-0" style="border-color:var(--border)">
-                <div class="font-mono text-[12px] uppercase tracking-widest mb-3" style="color:var(--faint)">Placeholder — not live data</div>
-                <p class="max-w-md mx-auto md:mx-0" style="color:var(--muted)">
-                    This panel is reserved for a real GitHub contribution graph and repository list once a public profile and API key are connected. No activity or statistics are fabricated here.
-                </p>
-                <div class="mt-8 grid grid-cols-3 gap-4 max-w-sm mx-auto md:mx-0 opacity-60">
-                    <div class="h-14 rounded-lg border" style="border-color:var(--border)"></div>
-                    <div class="h-14 rounded-lg border" style="border-color:var(--border)"></div>
-                    <div class="h-14 rounded-lg border" style="border-color:var(--border)"></div>
+            <div id="githubPanel" class="reveal rounded-2xl p-10 md:p-14 max-w-3xl mx-auto md:mx-0" style="border:1px solid var(--border)">
+                <div id="githubLoading" class="text-center">
+                    <div class="font-mono text-[12px] uppercase tracking-widest mb-3" style="color:var(--faint)">Loading live GitHub data…</div>
                 </div>
-                <div class="mt-8">
-                    <a id="githubProfileBtn" href="#" target="_blank" rel="noopener noreferrer" class="magnetic btn btn-ghost px-6 py-3 rounded-full font-medium text-sm focus-ring inline-flex">View GitHub Profile <span class="arrow">→</span></a>
+                <div id="githubContent" class="hidden">
+                    <div id="githubStats" class="grid grid-cols-3 gap-4 max-w-sm mx-auto md:mx-0 mb-8"></div>
+                    <div id="githubChart" class="mb-8 overflow-x-auto"></div>
+                    <div id="githubRepos" class="grid sm:grid-cols-2 gap-4"></div>
+                    <div class="mt-8 text-center md:text-left">
+                        <a id="githubProfileBtn" href="#" target="_blank" rel="noopener noreferrer" class="magnetic btn btn-ghost px-6 py-3 rounded-full font-medium text-sm focus-ring inline-flex">View GitHub Profile <span class="arrow">→</span></a>
+                    </div>
+                </div>
+                <div id="githubError" class="hidden text-center">
+                    <div class="font-mono text-[12px] uppercase tracking-widest mb-3" style="color:var(--faint)">Live data unavailable right now</div>
+                    <p class="max-w-md mx-auto md:mx-0" style="color:var(--muted)">GitHub's public API couldn't be reached (it may be rate-limited). Check the profile directly instead.</p>
+                    <div class="mt-8">
+                        <a id="githubProfileBtnFallback" href="#" target="_blank" rel="noopener noreferrer" class="magnetic btn btn-ghost px-6 py-3 rounded-full font-medium text-sm focus-ring inline-flex">View GitHub Profile <span class="arrow">→</span></a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2777,16 +2783,87 @@ TERM_COMMANDS.forEach((c, i) => {
 
 /* ================= GITHUB PROFILE BUTTON ================= */
 const githubProfileBtn = document.getElementById('githubProfileBtn');
-if (githubProfileBtn) {
+const githubProfileBtnFallback = document.getElementById('githubProfileBtnFallback');
+[githubProfileBtn, githubProfileBtnFallback].forEach(btn => {
+  if (!btn) return;
   if (CONFIG.githubUrl) {
-    githubProfileBtn.href = CONFIG.githubUrl;
+    btn.href = CONFIG.githubUrl;
   } else {
-    githubProfileBtn.classList.add('btn-disabled');
-    githubProfileBtn.setAttribute('aria-disabled', 'true');
-    githubProfileBtn.addEventListener('click', (e) => e.preventDefault());
-    githubProfileBtn.textContent = 'GitHub profile — coming soon';
+    btn.classList.add('btn-disabled');
+    btn.setAttribute('aria-disabled', 'true');
+    btn.addEventListener('click', (e) => e.preventDefault());
+    btn.textContent = 'GitHub profile — coming soon';
   }
-}
+});
+
+/* ================= LIVE GITHUB ACTIVITY (public API, no key needed) ================= */
+(async function loadGithubActivity() {
+  const loadingEl = document.getElementById('githubLoading');
+  const contentEl = document.getElementById('githubContent');
+  const errorEl = document.getElementById('githubError');
+  if (!loadingEl || !contentEl || !errorEl) return;
+
+  const username = CONFIG.githubUrl ? CONFIG.githubUrl.split('/').filter(Boolean).pop() : null;
+  if (!username) {
+    loadingEl.classList.add('hidden');
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const [userRes, reposRes] = await Promise.all([
+      fetch(`https://api.github.com/users/${username}`),
+      fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=6`)
+    ]);
+    if (!userRes.ok || !reposRes.ok) throw new Error('GitHub API request failed');
+    const user = await userRes.json();
+    const repos = await reposRes.json();
+
+    // Stats
+    const statsEl = document.getElementById('githubStats');
+    const stats = [
+      { label: 'Public repos', value: user.public_repos ?? '—' },
+      { label: 'Followers', value: user.followers ?? '—' },
+      { label: 'Following', value: user.following ?? '—' },
+    ];
+    statsEl.innerHTML = stats.map(s => `
+      <div class="h-auto py-4 rounded-lg border text-center" style="border-color:var(--border)">
+        <div class="font-display font-semibold text-2xl">${s.value}</div>
+        <div class="font-mono text-[10px] uppercase tracking-widest mt-1" style="color:var(--faint)">${s.label}</div>
+      </div>`).join('');
+
+    // Contribution graph (public, no-auth SVG service)
+    const chartEl = document.getElementById('githubChart');
+    chartEl.innerHTML = `
+      <div class="font-mono text-[11px] uppercase tracking-widest mb-3" style="color:var(--faint)">Contribution graph</div>
+      <img src="https://ghchart.rshah.org/${username}" alt="${username}'s GitHub contribution graph" class="w-full rounded-lg" style="min-width:600px;background:var(--card)" loading="lazy" />`;
+
+    // Repo list — most recently updated, non-fork, sorted by stars then recency
+    const repoList = Array.isArray(repos)
+      ? repos.filter(r => !r.fork).sort((a, b) => (b.stargazers_count - a.stargazers_count) || (new Date(b.pushed_at) - new Date(a.pushed_at))).slice(0, 6)
+      : [];
+    const reposEl = document.getElementById('githubRepos');
+    if (repoList.length) {
+      reposEl.innerHTML = repoList.map(r => `
+        <a href="${r.html_url}" target="_blank" rel="noopener noreferrer" class="rounded-xl p-5 block hover:opacity-80 transition-opacity" style="background:var(--card); border:1px solid var(--border)">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <h4 class="font-display font-semibold text-sm truncate">${r.name}</h4>
+            ${r.stargazers_count ? `<span class="font-mono text-[11px] flex items-center gap-1 shrink-0" style="color:var(--faint)">★ ${r.stargazers_count}</span>` : ''}
+          </div>
+          <p class="text-xs line-clamp-2" style="color:var(--muted)">${r.description ? r.description : 'No description provided.'}</p>
+          ${r.language ? `<span class="font-mono text-[10px] uppercase tracking-widest mt-3 inline-block" style="color:var(--accent-2)">${r.language}</span>` : ''}
+        </a>`).join('');
+    } else {
+      reposEl.innerHTML = `<p class="text-sm col-span-2" style="color:var(--muted)">No public repositories found.</p>`;
+    }
+
+    loadingEl.classList.add('hidden');
+    contentEl.classList.remove('hidden');
+  } catch (err) {
+    loadingEl.classList.add('hidden');
+    errorEl.classList.remove('hidden');
+  }
+})();
 
 /* ================= SOCIAL LINKS (hero + footer, config-driven) ================= */
 function socialIconsHTML(size) {
