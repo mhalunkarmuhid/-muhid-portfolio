@@ -3944,6 +3944,63 @@ function makeBlobMaterial(){
   renderEmptyState();
 })();
     </script>
+    <script>
+    /* ================= DYNAMIC CONTENT FROM ADMIN PANEL ================= */
+    (async function loadExtraContent() {
+      try {
+        const res = await fetch('/api/data');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (Array.isArray(data.achievements) && data.achievements.length) {
+          const grid = document.getElementById('achievementsGrid');
+          if (grid) {
+            data.achievements.forEach((a) => {
+              const el = document.createElement('div');
+              el.className = 'rounded-2xl p-6';
+              el.style.background = 'var(--card)';
+              el.style.border = '1px solid var(--border)';
+              el.innerHTML = `
+                <span class="font-mono text-[11px] uppercase tracking-widest" style="color:var(--accent-2)">${a.tag || ''}</span>
+                <h3 class="font-display font-semibold text-lg mt-3 mb-2">${a.title || ''}</h3>
+                <p class="text-sm" style="color:var(--muted)">${a.desc || ''}</p>`;
+              grid.appendChild(el);
+            });
+          }
+        }
+
+        if (Array.isArray(data.projects) && data.projects.length) {
+          const projectsList = document.getElementById('projectsList');
+          if (projectsList) {
+            let extraGrid = document.getElementById('extraProjectsGrid');
+            if (!extraGrid) {
+              extraGrid = document.createElement('div');
+              extraGrid.id = 'extraProjectsGrid';
+              extraGrid.className = 'grid sm:grid-cols-2 lg:grid-cols-3 gap-5 mt-16';
+              projectsList.insertAdjacentElement('afterend', extraGrid);
+            }
+            data.projects.forEach((p) => {
+              const el = document.createElement('div');
+              el.className = 'rounded-2xl p-6';
+              el.style.background = 'var(--card)';
+              el.style.border = '1px solid var(--border)';
+              const techHtml = (p.tech || '').split(',').map(t => t.trim()).filter(Boolean)
+                .map(t => `<span class="font-mono text-[11px] px-2.5 py-1 rounded-full" style="border:1px solid var(--border); color:var(--faint)">${t}</span>`).join('');
+              el.innerHTML = `
+                <span class="font-mono text-[11px] uppercase tracking-widest" style="color:var(--accent)">${p.category || ''}</span>
+                <h3 class="font-display font-semibold text-lg mt-3 mb-1">${p.title || ''}</h3>
+                <p class="text-sm mb-3" style="color:var(--muted)">${p.tagline || ''}</p>
+                ${p.description ? `<p class="text-sm mb-3" style="color:var(--fg)">${p.description}</p>` : ''}
+                ${techHtml ? `<div class="flex flex-wrap gap-2">${techHtml}</div>` : ''}`;
+              extraGrid.appendChild(el);
+            });
+          }
+        }
+      } catch (e) {
+        // Silently ignore — the site works fine with just its default content.
+      }
+    })();
+    </script>
 </body>
 
 </html>
